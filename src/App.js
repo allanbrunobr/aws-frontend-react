@@ -1,88 +1,95 @@
+// App.js
 import React, { useState, useRef } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
+import Recorder from './recorder';
+import './App.css';
+import axios from 'axios';
 
-const ffmpeg = new FFmpeg();
 
-
-function AudioRecorder() {
+const App = () => {
     const [isRecording, setIsRecording] = useState(false);
-    const [recordedBlob, setRecordedBlob] = useState(null);
-    const [convertedBlob, setConvertedBlob] = useState(null);
-    const mediaRecorderRef = useRef(null);
-    const audioRef = useRef(null);
+    const [isPaused, setIsPaused] = useState(false);
+    const [recordings, setRecordings] = useState([]);
+    const audioContextRef = useRef(null);
+    const gumStreamRef = useRef(null);
+    const recorderRef = useRef(null);
 
-    const startRecording = () => {
-        navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(stream => {
-                mediaRecorderRef.current = new MediaRecorder(stream);
-                mediaRecorderRef.current.ondataavailable = handleDataAvailable;
-                mediaRecorderRef.current.start();
-                setIsRecording(true);
-            })
-            .catch(error => {
-                console.error('Error accessing microphone:', error);
-            });
+    const startRecording = async () => {
+        setIsRecording(true);
+        setIsPaused(false);
+
+        const constraints = { audio: true, video: false };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        const input = audioContextRef.current.createMediaStreamSource(stream);
+        gumStreamRef.current = stream;
+        recorderRef.current = new Recorder(input, { numChannels: 1 });
+        recorderRef.current.record();
+    };
+
+    const pauseRecording = () => {
+        if (recorderRef.current.recording) {
+            recorderRef.current.stop();
+            setIsPaused(true);
+        } else {
+            recorderRef.current.record();
+            setIsPaused(false);
+        }
     };
 
     const stopRecording = () => {
-        mediaRecorderRef.current.stop();
         setIsRecording(false);
+        setIsPaused(false);
+        recorderRef.current.stop();
+        gumStreamRef.current.getAudioTracks()[0].stop();
+
+        recorderRef.current.exportWAV(blob => {
+            const url = URL.createObjectURL(blob);
+            const filename = new Date().toISOString() + '.wav';
+            setRecordings(prev => [...prev, { url, filename, blob }]);
+        });
     };
 
-    const handleDataAvailable = async (event) => {
-        if (event.data.size > 0) {
-            const blob = new Blob([event.data], { type: 'audio/webm' });
-            setRecordedBlob(blob);
-            await convertToWav(blob);
-        }
-    };
-
-    const convertToWav = async (blob) => {
-        if (!ffmpeg.loaded) {
-            await ffmpeg.load();
-        }
-        const webmFile = await fetchFile(blob);
-        await ffmpeg.writeFile('input.webm', webmFile);
-        await ffmpeg.exec(['-i', 'input.webm', 'output.wav']);
-        const data = await ffmpeg.readFile('output.wav');
-        const wavBlob = new Blob([data.buffer], { type: 'audio/wav' });
-        setConvertedBlob(wavBlob);
-    };
-
-    const handleSubmit = () => {
+    const uploadRecordings = async () => {
         const formData = new FormData();
-        formData.append('audio', recordedBlob, 'audio.wav');
-        fetch('http://localhost:8000/upload', {
-            method: 'POST',
-            body: formData,
-        })
-            .then(response => {
-                console.log('Audio sent successfully!');
-            })
-            .catch(error => {
-                console.error('Error sending audio:', error);
+        recordings.forEach(recording => {
+            formData.append('files', recording.blob, recording.filename);
+        });
+
+        try {
+            const response = await axios.post('http://localhost:8000/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             });
+            console.log('Upload successful:', response.data);
+        } catch (error) {
+            console.error('Error uploading files:', error);
+        }
     };
-
-    const handlePlay = () => {
-        audioRef.current.play();
-    };
-
     return (
-        <div className="audio-recorder">
-            <button onClick={isRecording ? stopRecording : startRecording}>
-                {isRecording ? 'Parar Gravação' : 'Iniciar Gravação'}
-            </button>
-            {recordedBlob && (
-                <div>
-                    <audio ref={audioRef} src={URL.createObjectURL(recordedBlob)} controls />
-                    <button onClick={handlePlay}>Reproduzir</button>
-                    <button onClick={handleSubmit}>Enviar</button>
-                </div>
+        <div>
+            <div id="controls">
+                <button onClick={startRecording} disabled={isRecording}>Record</button>
+                <button onClick={pauseRecording} disabled={!isRecording}>
+                    {isPaused ? 'Resume' : 'Pause'}
+                </button>
+                <button onClick={stopRecording} disabled={!isRecording}>Stop</button>
+            </div>
+            <div id="formats">Format: start recording to see sample rate</div>
+            <p><strong>Recordings:</strong></p>
+            <ol id="recordingsList">
+                {recordings.map((recording, index) => (
+                    <li key={index}>
+                        <audio controls src={recording.url}></audio>
+                        <a href={recording.url} download={recording.filename}>Save to disk</a>
+                    </li>
+                ))}
+            </ol>
+            {recordings.length > 0 && (
+                <button onClick={uploadRecordings}>Upload Recordings</button>
             )}
         </div>
     );
-}
+};
 
-export default AudioRecorder;
+export default App;
