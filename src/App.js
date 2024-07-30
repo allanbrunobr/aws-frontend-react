@@ -9,6 +9,8 @@ const App = () => {
     const [isRecording, setIsRecording] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [recordings, setRecordings] = useState([]);
+    const [medicalText, setMedicalText] = useState(""); // State para o texto médico
+    const [medicalAnalysis, setMedicalAnalysis] = useState(""); // State para o resultado da análise médica
     const audioContextRef = useRef(null);
     const gumStreamRef = useRef(null);
     const recorderRef = useRef(null);
@@ -66,6 +68,21 @@ const App = () => {
             console.error('Error uploading files:', error);
         }
     };
+
+    const handleMedicalAnalysis = async () => {
+        try {
+            const response = await axios.post('http://localhost:8000/analyze_medical_text', medicalText, {
+                headers: {
+                    'Content-Type': 'text/plain'
+                }
+            });
+            console.log('Response:', response.data); // Verifique a resposta no console
+            setMedicalAnalysis(response.data);
+        } catch (error) {
+            console.error('Error analyzing medical text:', error);
+            setMedicalAnalysis('Error analyzing text');
+        }
+    };
     return (
         <div>
             <div id="controls">
@@ -75,7 +92,6 @@ const App = () => {
                 </button>
                 <button onClick={stopRecording} disabled={!isRecording}>Stop</button>
             </div>
-            <div id="formats">Format: start recording to see sample rate</div>
             <p><strong>Recordings:</strong></p>
             <ol id="recordingsList">
                 {recordings.map((recording, index) => (
@@ -86,8 +102,25 @@ const App = () => {
                 ))}
             </ol>
             {recordings.length > 0 && (
-                <button onClick={uploadRecordings}>Upload Recordings</button>
+                <button onClick={uploadRecordings}>Transcribe Recording(s) to Text</button>
             )}
+            <div id="formats">The transcriptions will be stored in the '/transcripts' folder.</div>
+            <div id="medical-text-analysis">
+                <h2>Medical Text Analysis</h2>
+                <textarea
+                    value={medicalText}
+                    onChange={(e) => setMedicalText(e.target.value)}
+                    placeholder="Enter medical text here..."
+                    rows="4"
+                    cols="50"
+                ></textarea>
+                <br />
+                <button onClick={handleMedicalAnalysis}>Analyze Medical Text</button>
+                <div id="medical-analysis-result">
+                    <h3>Analysis Result:</h3>
+                    <pre>{medicalAnalysis}</pre>
+                </div>
+            </div>
         </div>
     );
 };
